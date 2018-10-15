@@ -41,11 +41,11 @@ async def select(sql, args, size=None):
 
 
 async def execute(sql, args):
-    logging.log(sql, args)
+    # logging.log(sql)
     with (await __pool) as conn:
         try:
             cur = await conn.cursor()
-            await cur.excute(sql.replace('?', '%s'), args)
+            await cur.execute(sql.replace('?', '%s'), args)
             affected = cur.rowcount
             await cur.close()
         except BaseException as e:
@@ -76,6 +76,30 @@ class StringField(Field):
         super().__init__(name, ddl, primary_key, default)
 
 
+class BooleanField(Field):
+
+    def __init__(self, name=None, default=False):
+        super().__init__(name, 'boolean', False, default)
+
+
+class IntegerField(Field):
+
+    def __init__(self, name=None, primary_key=False, default=0):
+        super().__init__(name, 'bigint', primary_key, default)
+
+
+class FloatField(Field):
+
+    def __init__(self, name=None, primary_key=False, default=0.0):
+        super().__init__(name, 'real', primary_key, default)
+
+
+class TextField(Field):
+
+    def __init__(self, name=None, default=None):
+        super().__init__(name, 'text', False, default)
+
+
 class ModelMetaclass(type):
     def __new__(cls, name, bases, attrs):
         if name == 'Model':
@@ -90,10 +114,11 @@ class ModelMetaclass(type):
                 logging.info('found mapping:%s=>%s' % (k, v))
                 mappings[k] = v
                 if v.primary_key:
-                    raise RuntimeError('Duplicate primary key for field:%s') % k
-                primary_key = k
-            else:
-                fields.append(k)
+                    if primary_key:
+                        raise RuntimeError('Duplicate primary key for field:%s') % k
+                    primary_key = k
+                else:
+                    fields.append(k)
         if not primary_key:
             raise RuntimeError('primary key not found.')
         for k in mappings.keys():
@@ -102,7 +127,7 @@ class ModelMetaclass(type):
         attrs['__mappings__'] = mappings
         attrs['__table__'] = table_name
         attrs['__primary_key__'] = primary_key
-        attrs['__fileds__'] = fields
+        attrs['__fields__'] = fields
 
         attrs['__select__'] = "select %s,%s from %s" % (primary_key, ','.join(escaped_fields), table_name)
         attrs['__insert__'] = "insert into %s (%s,%s)values(%s)" % (
@@ -132,7 +157,7 @@ class Model(dict, metaclass=ModelMetaclass):
     def get_value_or_default(self, key):
         value = getattr(self, key, None)
         if value is None:
-            field = self.__mapings__[key]
+            field = self.__mappings__[key]
             if field.default is not None:
                 value = field.default() if callable(field.default) else field.default
                 logging.debug('using default value for %s : %s' % (key, str(value)))
@@ -149,7 +174,7 @@ class Model(dict, metaclass=ModelMetaclass):
 
     async def save(self):
         args = list(map(self.get_value_or_default, self.__fields__))
-        args.append(self.get_value_or_default(self.primary_key))
+        args.append(self.get_value_or_default(self.__primary_key__))
         rows = await execute(self.__insert__, args)
         if rows != 1:
             logging.warn('failed to insert record: affected rows：%s' % rows)
