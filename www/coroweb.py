@@ -1,11 +1,13 @@
 # Created by: coderShan
 # Created on: 2018/10/16
+import asyncio
 import functools
 import inspect
 import logging
+import os
 from urllib import parse
 
-from aiohttp import web, os, asyncio
+from aiohttp import web
 
 from apis import APIError
 
@@ -21,7 +23,7 @@ def get(path):
             return func(*args, **kw)
 
         wrapper.__method__ = 'GET'
-        wrapper.__router = path
+        wrapper.__router__ = path
         return wrapper
 
     return decorator
@@ -38,7 +40,7 @@ def post(path):
             return func(*args, **kw)
 
         wrapper.__method__ = 'POST'
-        wrapper.__route__ = path
+        wrapper.__router__ = path
         return wrapper
 
     return decorator
@@ -88,6 +90,7 @@ def has_request_arg(fn):
                 param.kind != inspect.Parameter.VAR_KEYWORD and param.kind != inspect.Parameter.VAR_POSITIONAL and param.kind != inspect.Parameter.KEYWORD_ONLY):
             raise ValueError(
                 'request parameter must be the last named parameter in function:%s%s' % (fn.__name__, str(sig)))
+    return found
 
 
 class RequestHandler(object):
@@ -106,7 +109,7 @@ class RequestHandler(object):
             if request.method == 'POST':
                 if not request.content_type:
                     return web.HTTPBadRequest('Missing Content-Type.')
-                ct = request.content.type.lower()
+                ct = request.content_type.lower()
                 if ct.startswith('application/json'):
                     params = await request.json()
                     if not isinstance(params, dict):
@@ -137,6 +140,8 @@ class RequestHandler(object):
                 if k in kw:
                     logging.warning('Duplicate arg name in named arg and kw args: %s' % k)
                 kw[k] = v
+        if self._has_request_arg:
+            kw['request'] = request
         if self._required_kw_args:
             for name in self._required_kw_args:
                 if name not in kw:
@@ -157,7 +162,7 @@ def add_static(app):
 
 def add_router(app, fn):
     method = getattr(fn, '__method__', None)
-    path = getattr(fn, '__route__', None)
+    path = getattr(fn, '__router__', None)
     if path is None or method is None:
         raise ValueError('@get or @post not defined in %s' % str(fn))
     if not asyncio.iscoroutinefunction(fn) and not inspect.isgeneratorfunction(fn):
@@ -183,5 +188,3 @@ def add_routers(app, module_name):
             path = getattr(fn, '__router__', None)
             if method and path:
                 add_router(app, fn)
-
-

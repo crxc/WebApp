@@ -1,7 +1,15 @@
 # Created by: coderShan
 # Created on: 2018/10/8
-
+import hashlib
 import logging
+
+import coroweb
+import orm
+from bean import User
+from coroweb import get
+from jinja2 import Environment, FileSystemLoader
+
+from handlers import COOKIE_NAME, _COOKIE_KEY
 
 logging.basicConfig(level=logging.INFO)
 import asyncio, os, json, time
@@ -9,14 +17,12 @@ from datetime import datetime
 from aiohttp import web
 
 
-def index(request):
-    return web.Response(body=b'<h1>Hello,world<h1>', content_type='text/html')
-
-
 async def logger_factory(app, handler):
     async def logger(request):
         logging.info('Request：%s %s' % (request.method, request.path))
         return await handler(request)
+
+    return logger
 
 
 async def data_factory(app, handler):
@@ -73,6 +79,45 @@ async def response_factory(app, handler):
     return response
 
 
+async def cookie2user(cookie_str):
+    if not cookie_str:
+        return None
+    try:
+        L = cookie_str.split('-')
+        if len(L) != 3:
+            return None
+        uid, expires, sha1 = L
+        if int(expires) < time.time():
+            return None
+        user = await User.find(uid)
+        if user is None:
+            return None
+        s = '%s-%s-%s-%s' % (uid, user.passwd, expires, _COOKIE_KEY)
+        if sha1 != hashlib.sha1(s.encode('utf-8')).hexdigest():
+            logging.info('invalid sha1')
+            return None
+        user.passwd = '******'
+        return user
+    except Exception as e:
+        logging.exception(e)
+        return None
+
+
+async def auth_factory(app, handler):
+    async def auth(request):
+        logging.info('check user:%s %s' % (request.method, request.path))
+        request.__user__ = None
+        cookie_str = request.cookies.get(COOKIE_NAME)
+        if cookie_str:
+            user = await cookie2user(cookie_str)
+            if user:
+                logging.info('set current user: %s' % user.email)
+                request.__user__ = user
+        return await handler(request)
+
+    return auth
+
+
 def datetime_filter(t):
     delta = int(time.time() - t)
     if delta < 60:
@@ -87,11 +132,36 @@ def datetime_filter(t):
     return u'%s年%s月%s日' % (dt.year, dt.month, dt.day)
 
 
+def init_jinja2(app, **kw):
+    logging.info('init jinja2...')
+    options = dict(
+        autoescape=kw.get('autoescape', True),
+        block_start_string=kw.get('block_start_string', '{%'),
+        block_end_string=kw.get('block_end_string', '%}'),
+        variable_start_string=kw.get('variable_start_string', '{{'),
+        variable_end_string=kw.get('variable_end_string', '}}'),
+        auto_reload=kw.get('auto_reload', True)
+    )
+    path = kw.get('path', None)
+    if path is None:
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'templates')
+    logging.info('set jinja2 template path: %s' % path)
+    env = Environment(loader=FileSystemLoader(path), **options)
+    filters = kw.get('filters', None)
+    if filters is not None:
+        for name, f in filters.items():
+            env.filters[name] = f
+    app['__templating__'] = env
+
+
 async def init(loop):
+    await orm.create_pool(loop=loop, host='127.0.0.1', port=3306, user='root', password='', db='awesome')
     app = web.Application(loop=loop, middlewares=[
         logger_factory, response_factory
     ])
-    app.router.add_route('GET', '/', index)
+    init_jinja2(app, filters=dict(datetime=datetime_filter))
+    # app.router.add_route('GET', '/', index)
+    coroweb.add_routers(app, "handlers")
     srv = await loop.create_server(app.make_handler(), '127.0.0.1', 9000)
     logging.info('server started at http://127.0.0.1:9000...')
     return srv

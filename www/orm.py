@@ -8,6 +8,10 @@ import aiomysql as aiomysql
 logging.basicConfig(level=logging.INFO)
 
 
+def log(sql, args=()):
+    logging.info('SQL: %s' % sql)
+
+
 async def create_pool(loop, **kw):
     logging.info('create database connection pool...')
     global __pool
@@ -26,11 +30,11 @@ async def create_pool(loop, **kw):
 
 
 async def select(sql, args, size=None):
-    logging.log(sql, args)
+    log(sql, args)
     global __pool
     with (await __pool) as conn:
         cur = await conn.cursor(aiomysql.DictCursor)
-        await cur.excute(sql.replace('?', '%s'), args or ())
+        await cur.execute(sql.replace('?', '%s'), args or ())
         if size:
             rs = await cur.fetchmany(size)
         else:
@@ -163,6 +167,33 @@ class Model(dict, metaclass=ModelMetaclass):
                 logging.debug('using default value for %s : %s' % (key, str(value)))
                 setattr(self, key, value)
         return value
+
+    @classmethod
+    async def findAll(cls, where=None, args=None, **kw):
+        'find objects by where clause.'
+        sql = [cls.__select__]
+        if where:
+            sql.append('where')
+            sql.append(where)
+        if args is None:
+            args = []
+        orderBy = kw.get('orderBy', None)
+        if orderBy:
+            sql.append('orderBy')
+            sql.append(orderBy)
+        limit = kw.get('limit', None)
+        if limit is not None:
+            sql.append('limit')
+            if isinstance(limit, int):
+                sql.append('?')
+                args.append(limit)
+            elif isinstance(limit, tuple) and len(limit) == 2:
+                sql.append('?,?')
+                args.extend(limit)
+            else:
+                raise ValueError('Invalid limit value:%s' % str(limit))
+        rs = await select(' '.join(sql), args)
+        return [cls(**r) for r in rs]
 
     @classmethod
     async def find(cls, pk):
