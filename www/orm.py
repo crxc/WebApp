@@ -19,8 +19,8 @@ async def create_pool(loop, **kw):
         host=kw.get('host', 'localhost'),
         port=kw.get('port', 3306),
         user=kw.get('user'),
-        password=kw['password'],
-        db=kw['db'],
+        password=kw.get('password'),
+        db=kw.get('database'),
         charset=kw.get('charset', 'utf8'),
         autocommit=kw.get('autocommit', True),
         maxsize=kw.get('maxsize', 10),
@@ -179,7 +179,7 @@ class Model(dict, metaclass=ModelMetaclass):
             args = []
         orderBy = kw.get('orderBy', None)
         if orderBy:
-            sql.append('orderBy')
+            sql.append('order by')
             sql.append(orderBy)
         limit = kw.get('limit', None)
         if limit is not None:

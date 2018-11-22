@@ -6,6 +6,7 @@ import logging
 import coroweb
 import orm
 from bean import User
+from config import configs
 from coroweb import get
 from jinja2 import Environment, FileSystemLoader
 
@@ -56,6 +57,7 @@ async def response_factory(app, handler):
             resp.content_type = 'text/html;charset=utf-8'
             return resp
         if isinstance(r, dict):
+            r['__user__'] = request.__user__
             template = r.get('__template__')
             if template is None:
                 resp = web.Response(
@@ -155,12 +157,13 @@ def init_jinja2(app, **kw):
 
 
 async def init(loop):
-    await orm.create_pool(loop=loop, host='127.0.0.1', port=3306, user='root', password='', db='awesome')
+    await orm.create_pool(loop=loop, **configs.db)
     app = web.Application(loop=loop, middlewares=[
-        logger_factory, response_factory
+        logger_factory, response_factory, auth_factory
     ])
     init_jinja2(app, filters=dict(datetime=datetime_filter))
     # app.router.add_route('GET', '/', index)
+    coroweb.add_static(app)
     coroweb.add_routers(app, "handlers")
     srv = await loop.create_server(app.make_handler(), '127.0.0.1', 9000)
     logging.info('server started at http://127.0.0.1:9000...')
